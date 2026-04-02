@@ -207,17 +207,30 @@ function parseHTMLPrompts(html) {
 }
 
 async function pollTask(taskId, apiKey, onProgress) {
-  const url = `${KIE_BASE}/jobs/detail?taskId=${taskId}`;
+  const url = `${KIE_BASE}/jobs/recordInfo?taskId=${taskId}`;
   let attempts = 0;
   while (attempts < 120) {
-    await new Promise((r) => setTimeout(r, 3000));
+    await new Promise((r) => setTimeout(r, 4000));
     const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
     const json = await res.json();
     const data = json.data;
-    if (!data) throw new Error("No task data returned");
-    onProgress(data.progress ?? 0);
-    if (data.successFlag === 1) return data.response?.result_urls || data.response?.results || [];
-    if (data.successFlag === 2) throw new Error(data.errorMessage || "Generation failed");
+    if (!data) {
+      // May still be queuing — wait and retry instead of failing immediately
+      attempts++;
+      continue;
+    }
+    // Progress: use progress field if available (0-1 float or 0-100)
+    const rawProg = data.progress ?? 0;
+    onProgress(rawProg > 1 ? rawProg / 100 : rawProg);
+    // Status-based completion check
+    const status = (data.status || "").toLowerCase();
+    if (status === "success" || data.successFlag === 1) {
+      const resp = data.response || {};
+      return resp.result_urls || resp.results || resp.imageUrls || resp.image_urls || [];
+    }
+    if (status === "fail" || data.successFlag === 2) {
+      throw new Error(data.errorMessage || data.msg || "Generation failed");
+    }
     attempts++;
   }
   throw new Error("Timed out waiting for generation");
@@ -712,13 +725,21 @@ export default function App() {
     try {
       const fd = new FormData();
       fd.append("file", refImage);
-      const res = await fetch(`${KIE_BASE}/upload`, {
-        method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: fd,
+      fd.append("uploadPath", "images/user-uploads");
+      // Kie.ai file upload uses a different base URL
+      const res = await fetch("https://kieai.redpandaai.co/api/file-stream-upload", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: fd,
       });
       const json = await res.json();
-      const url = json.data?.url || json.data?.fileUrl || null;
-      if (url) { setRefImageUrl(url); return url; }
-    } catch {}
+      // Response has fileUrl or downloadUrl inside data
+      const url = json.data?.fileUrl || json.data?.downloadUrl || json.data?.url || null;
+      if (url) { setRefImageUrl(url); toast("Reference image uploaded ✓", "success"); return url; }
+      toast("Image upload failed: no URL returned", "error");
+    } catch (e) {
+      toast("Image upload error: " + e.message, "error");
+    }
     return null;
   };
 

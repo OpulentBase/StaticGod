@@ -18,17 +18,25 @@ async function getJSZip() {
 
 async function downloadZip(outputs, batchVersion, toast) {
   if (!outputs.length) return;
-  toast("Building ZIP…", "info");
+  toast("Fetching images for ZIP…", "info");
   try {
     const JSZip = await getJSZip();
     const zip = new JSZip();
+    let fetched = 0, failed = 0;
     await Promise.all(
       outputs.map(async (out) => {
         try {
-          const res = await fetch(out.url);
+          // Try fetching the image — may be blocked by CORS on some hosts
+          const res = await fetch(out.url, { mode: "cors" });
+          if (!res.ok) throw new Error("HTTP " + res.status);
           const blob = await res.blob();
           zip.file(`${out.path}/${out.name}`, blob);
-        } catch {}
+          fetched++;
+        } catch {
+          // CORS blocked — save a .txt file with the direct URL instead
+          zip.file(`${out.path}/${out.name}.url.txt`, out.url);
+          failed++;
+        }
       })
     );
     const blob = await zip.generateAsync({ type: "blob" });
@@ -38,7 +46,13 @@ async function downloadZip(outputs, batchVersion, toast) {
     a.download = `ads_${todayStr()}_${batchVersion}.zip`;
     a.click();
     URL.revokeObjectURL(url);
-    toast("ZIP downloaded! 🎉", "success");
+    if (failed > 0 && fetched === 0) {
+      toast(`ZIP saved with ${failed} URL files — open .txt files to download images directly`, "info");
+    } else if (failed > 0) {
+      toast(`ZIP done: ${fetched} images + ${failed} URL files`, "success");
+    } else {
+      toast(`ZIP downloaded — ${fetched} images! 🎉`, "success");
+    }
   } catch (e) {
     toast("ZIP failed: " + e.message, "error");
   }

@@ -48,58 +48,115 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10).replace(/-/g, "");
 }
 
+// Extract all positions of a className in raw HTML
+function findClassPositions(html, className) {
+  const needle = `class="${className}"`;
+  const positions = [];
+  let idx = 0;
+  while ((idx = html.indexOf(needle, idx)) !== -1) { positions.push(idx); idx++; }
+  return positions;
+}
+
+// Extract inner text of the next tag after a position, stripping child tags
+function extractTagText(html, fromPos) {
+  const open = html.indexOf(">", fromPos);
+  if (open === -1) return "";
+  const close = html.indexOf("<", open);
+  if (close === -1) return "";
+  return html.slice(open + 1, close).trim();
+}
+
+// Extract all text inside a block starting at pos, stripping all HTML tags & buttons
+function extractBlockText(html, startPos) {
+  // Find the opening > of the div
+  const divOpen = html.indexOf(">", startPos);
+  if (divOpen === -1) return "";
+  // Walk forward counting div depth to find the matching close
+  let depth = 1, i = divOpen + 1;
+  while (i < html.length && depth > 0) {
+    if (html[i] === "<") {
+      if (html.slice(i, i + 2) === "</") { depth--; i += 2; }
+      else if (html.slice(i, i + 4) === "<!--") { i = html.indexOf("-->", i) + 3; }
+      else { depth++; i++; }
+    } else { i++; }
+  }
+  const inner = html.slice(divOpen + 1, i - "</div>".length);
+  // Strip all tags and decode common entities
+  return inner
+    .replace(/<button[\s\S]*?<\/button>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ").replace(/&#\d+;/g, "")
+    .replace(/\s{2,}/g, " ").trim();
+}
+
+// Find first <p> text inside a block at pos
+function extractFirstPText(html, blockStart) {
+  const divOpen = html.indexOf(">", blockStart);
+  if (divOpen === -1) return "";
+  const blockEnd = blockStart + 5000; // reasonable limit
+  const pStart = html.indexOf("<p>", divOpen);
+  if (pStart === -1 || pStart > blockEnd) return "";
+  const pEnd = html.indexOf("</p>", pStart);
+  if (pEnd === -1) return "";
+  return html.slice(pStart + 3, pEnd)
+    .replace(/<[^>]+>/g, " ").replace(/\s{2,}/g, " ").trim();
+}
+
 function parseHTMLPrompts(html) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, "text/html");
   const sections = [];
 
-  // ── FORMAT 1: BunkerAI Batch format ──────────────────────────────────────
-  // Sections: .sec > .sec-title  |  Prompts: .pb grouped under each .sec
-  const secEls = Array.from(doc.querySelectorAll(".sec"));
-  if (secEls.length > 0) {
-    const allPBs = Array.from(doc.querySelectorAll(".pb"));
-    secEls.forEach((secEl, i) => {
-      const title = secEl.querySelector(".sec-title")?.textContent?.trim() || `Section ${i + 1}`;
-      const nextSec = secEls[i + 1] || null;
+  // ── FORMAT 1: BunkerAI Batch ──────────────────────────────────────────────
+  // .sec divs contain .sec-title; .pb divs are siblings grouped by position
+  const secPositions = findClassPositions(html, "sec");
+  const pbPositions  = findClassPositions(html, "pb");
+
+  if (secPositions.length > 0 && pbPositions.length > 0) {
+    secPositions.forEach((secPos, i) => {
+      // Extract section title from .sec-title inside this .sec
+      const titleIdx = html.indexOf('class="sec-title"', secPos);
+      const title = titleIdx !== -1 ? extractTagText(html, titleIdx) : `Section ${i + 1}`;
+      const sectionEnd = secPositions[i + 1] || html.length;
       const prompts = [];
-      allPBs.forEach((pb) => {
-        const afterThis = secEl.compareDocumentPosition(pb) & Node.DOCUMENT_POSITION_FOLLOWING;
-        const beforeNext = !nextSec || (nextSec.compareDocumentPosition(pb) & Node.DOCUMENT_POSITION_PRECEDING);
-        if (afterThis && beforeNext) {
-          const clone = pb.cloneNode(true);
-          clone.querySelectorAll("button").forEach((b) => b.remove());
-          const txt = (clone.innerText || clone.textContent || "").trim();
-          if (txt.length > 20) prompts.push(txt);
+      pbPositions.forEach((pbPos) => {
+        if (pbPos > secPos && pbPos < sectionEnd) {
+          const txt = extractBlockText(html, pbPos);
+          if (txt.length > 30) prompts.push(txt);
         }
       });
       if (prompts.length) sections.push({ title, prompts });
     });
   }
 
-  // ── FORMAT 2: Dandy / ad-card format ─────────────────────────────────────
-  // Sections: .ad-card  |  Prompts: .prompt-box > p or .prompt-block p
+  // ── FORMAT 2: Dandy / ad-card ─────────────────────────────────────────────
+  // Each .ad-card is a section; .prompt-box contains a <p> with the prompt
   if (sections.length === 0) {
-    const adCards = doc.querySelectorAll(".ad-card");
-    if (adCards.length > 0) {
-      adCards.forEach((card, i) => {
-        const title =
-          card.querySelector(".card-title")?.textContent?.trim() ||
-          card.querySelector(".ad-number")?.textContent?.trim() ||
-          `Ad ${i + 1}`;
+    const adCardPositions    = findClassPositions(html, "ad-card");
+    const promptBoxPositions = findClassPositions(html, "prompt-box");
+
+    if (adCardPositions.length > 0 && promptBoxPositions.length > 0) {
+      adCardPositions.forEach((cardPos, i) => {
+        const titleIdx = html.indexOf('class="card-title"', cardPos);
+        const cardEnd  = adCardPositions[i + 1] || html.length;
+        const title    = titleIdx !== -1 && titleIdx < cardEnd
+          ? extractTagText(html, titleIdx)
+          : `Ad ${i + 1}`;
         const prompts = [];
-        card.querySelectorAll(".prompt-box p, .prompt-block p").forEach((p) => {
-          const clone = p.cloneNode(true);
-          clone.querySelectorAll("button").forEach((b) => b.remove());
-          const txt = (clone.textContent || "").trim();
-          if (txt.length > 20) prompts.push(txt);
+        promptBoxPositions.forEach((pbPos) => {
+          if (pbPos > cardPos && pbPos < cardEnd) {
+            const txt = extractFirstPText(html, pbPos);
+            if (txt.length > 20) prompts.push(txt);
+          }
         });
         if (prompts.length) sections.push({ title, prompts });
       });
     }
   }
 
-  // ── FORMAT 3: Generic <section> or [data-section] ────────────────────────
+  // ── FORMAT 3: Generic <section> / [data-section] ─────────────────────────
   if (sections.length === 0) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
     const sectionEls = doc.querySelectorAll("section, [data-section], article, .prompt-section");
     sectionEls.forEach((el, i) => {
       const title =
@@ -108,8 +165,8 @@ function parseHTMLPrompts(html) {
         `Section ${i + 1}`;
       const prompts = [];
       el.querySelectorAll("p, li, .prompt, [data-prompt]").forEach((p) => {
-        const txt = p.textContent.trim();
-        if (txt.length > 20) prompts.push(txt);
+        const t = p.textContent.trim();
+        if (t.length > 20) prompts.push(t);
       });
       if (prompts.length) sections.push({ title, prompts });
     });
@@ -117,6 +174,8 @@ function parseHTMLPrompts(html) {
 
   // ── FORMAT 4: h2/h3 heading-delimited ────────────────────────────────────
   if (sections.length === 0) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
     doc.querySelectorAll("h2, h3").forEach((h) => {
       const title = h.textContent.trim();
       const prompts = [];
@@ -134,6 +193,8 @@ function parseHTMLPrompts(html) {
 
   // ── FORMAT 5: Last resort — all <p> ──────────────────────────────────────
   if (sections.length === 0) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
     const prompts = [];
     doc.querySelectorAll("p").forEach((p) => {
       const t = p.textContent.trim();

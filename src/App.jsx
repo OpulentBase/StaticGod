@@ -220,39 +220,53 @@ async function pollTask(taskId, apiKey, onProgress) {
       continue;
     }
 
-    // Log every raw response so we can debug in browser console
-    console.log("[StaticGod] poll attempt", attempts, JSON.stringify(json));
-
     const data = json?.data;
     if (!data) { attempts++; continue; }
 
-    // Update progress (can be "0.50" string or 0.5 float or 50 int)
-    const rawProg = parseFloat(data.progress ?? 0);
-    onProgress(rawProg > 1 ? rawProg / 100 : rawProg);
+    const state = (data.state || "").toLowerCase();
 
-    // Check for failure
-    const sf = data.successFlag;
-    if (sf === 2) throw new Error(data.errorMessage || "Generation failed");
-
-    // Check for success — successFlag === 1
-    if (sf === 1) {
-      const resp = data.response;
-      console.log("[StaticGod] SUCCESS response:", JSON.stringify(resp));
-      if (!resp) { attempts++; continue; } // response not populated yet, keep polling
-      // Handle all possible URL field shapes from different Kie.ai models
-      const urls = [
-        ...(Array.isArray(resp.result_urls) ? resp.result_urls : []),
-        ...(Array.isArray(resp.results) ? resp.results : []),
-        ...(Array.isArray(resp.image_urls) ? resp.image_urls : []),
-        ...(Array.isArray(resp.imageUrls) ? resp.imageUrls : []),
-        ...(resp.resultImageUrl ? [resp.resultImageUrl] : []),
-        ...(resp.imageUrl ? [resp.imageUrl] : []),
-        ...(typeof resp === "string" ? [resp] : []),
-      ].filter(Boolean);
-      console.log("[StaticGod] extracted URLs:", urls);
-      if (urls.length > 0) return urls;
-      // No URLs yet despite successFlag=1, keep trying a few more times
+    // Check failure
+    if (state === "fail" || data.failCode) {
+      throw new Error(data.failMsg || "Generation failed");
     }
+
+    // Check success — Nano Banana uses state:"success" + resultJson (a JSON string)
+    if (state === "success") {
+      // resultJson is a JSON-encoded string containing the image URL
+      let urls = [];
+      if (data.resultJson) {
+        try {
+          const parsed = JSON.parse(data.resultJson);
+          urls = [
+            ...(Array.isArray(parsed.result_urls) ? parsed.result_urls : []),
+            ...(Array.isArray(parsed.images) ? parsed.images : []),
+            ...(parsed.resultImageUrl ? [parsed.resultImageUrl] : []),
+            ...(parsed.imageUrl ? [parsed.imageUrl] : []),
+            ...(parsed.url ? [parsed.url] : []),
+            ...(typeof parsed === "string" ? [parsed] : []),
+          ].filter(Boolean);
+          // If parsed is array of strings directly
+          if (urls.length === 0 && Array.isArray(parsed)) {
+            urls = parsed.filter(u => typeof u === "string" && u.startsWith("http"));
+          }
+        } catch {
+          // resultJson might be a plain URL string
+          if (data.resultJson.startsWith("http")) urls = [data.resultJson];
+        }
+      }
+      // Also check response field as fallback
+      if (urls.length === 0 && data.response) {
+        const resp = data.response;
+        urls = [
+          ...(Array.isArray(resp.result_urls) ? resp.result_urls : []),
+          ...(resp.resultImageUrl ? [resp.resultImageUrl] : []),
+          ...(resp.imageUrl ? [resp.imageUrl] : []),
+        ].filter(Boolean);
+      }
+      if (urls.length > 0) return urls;
+    }
+
+    // Still waiting/queuing/generating — keep polling
     attempts++;
   }
   throw new Error("Timed out — check kie.ai dashboard for task status");

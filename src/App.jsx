@@ -520,14 +520,14 @@ const css = `
     .body-layout { grid-template-columns: 1fr; }
     .sidebar {
       position: fixed; top: 0; left: 0;
-      width: min(88vw, 320px); height: 100vh;
+      width: min(88vw, 320px); height: 100dvh;
       z-index: 199; transform: translateX(-110%);
       transition: transform .26s cubic-bezier(.4,0,.2,1);
     }
     .sidebar.open { transform: translateX(0); box-shadow: 12px 0 48px rgba(0,0,0,.65); }
     .sidebar-overlay.open { display: block; }
-    .sidebar-scroll { padding: 16px; padding-top: calc(var(--header-h) + 12px); }
-    .sidebar-footer { padding: 12px 16px; }
+    .sidebar-scroll { padding: 16px; padding-top: calc(var(--header-h) + 12px); padding-bottom: 8px; }
+    .sidebar-footer { padding: 12px 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
     .main { height: calc(100vh - var(--header-h)); }
     .batch-stat { padding: 8px 14px; }
     .tabs { padding: 0 12px; overflow-x: auto; scrollbar-width: none; }

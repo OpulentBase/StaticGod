@@ -375,6 +375,55 @@ const css = `
   .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
   .empty .big { font-size: 48px; margin-bottom: 12px; }
   .empty p { font-size: 13px; line-height: 1.6; }
+
+  /* mobile toggle */
+  .sidebar-toggle {
+    display: none; background: none; border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 6px 12px;
+    font-size: 18px; cursor: pointer; line-height: 1;
+  }
+
+  /* responsive */
+  @media (max-width: 768px) {
+    .header { padding: 14px 16px; gap: 10px; }
+    .header h1 { font-size: 18px; }
+    .header p { display: none; }
+    .sidebar-toggle { display: flex; align-items: center; justify-content: center; margin-left: auto; }
+    .header-right { margin-left: 0; }
+
+    .layout { grid-template-columns: 1fr; position: relative; }
+
+    .sidebar {
+      position: fixed; top: 0; left: 0; width: 88vw; max-width: 360px;
+      height: 100vh; max-height: 100vh; z-index: 200;
+      background: var(--surface); border-right: 1px solid var(--border);
+      transform: translateX(-110%); transition: transform .3s ease;
+      padding-top: 70px;
+    }
+    .sidebar.open { transform: translateX(0); }
+
+    .sidebar-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
+      z-index: 199;
+    }
+    .sidebar-overlay.open { display: block; }
+
+    .main { max-height: none; padding: 16px; }
+
+    .batch-info { flex-wrap: wrap; gap: 12px; padding: 12px 14px; }
+
+    .settings-grid { grid-template-columns: 1fr 1fr; }
+
+    .output-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+
+    .dl-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+
+    .tabs { overflow-x: auto; }
+    .tab { white-space: nowrap; padding: 10px 14px; font-size: 12px; }
+
+    .toast-wrap { bottom: 16px; right: 16px; left: 16px; }
+    .toast { max-width: 100%; }
+  }
 `;
 
 // ── main app ───────────────────────────────────────────────────────────────────
@@ -400,6 +449,7 @@ export default function App() {
   const [outputs, setOutputs] = useState([]); // [{path, name, url, section, prompt}]
   const [tab, setTab] = useState("prompts");
   const [toasts, setToasts] = useState([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [vfs] = useState(() => new VirtualFolder());
   const htmlInputRef = useRef();
   const refInputRef = useRef();
@@ -568,12 +618,15 @@ export default function App() {
             {!running && doneCount > 0 && (
               <div className="credits-badge">✓ {doneCount} done · {errorCount} errors</div>
             )}
+            <button className="sidebar-toggle" onClick={() => setSidebarOpen(o => !o)}>☰</button>
           </div>
         </div>
 
         <div className="layout">
+          {/* mobile overlay */}
+          <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} />
           {/* sidebar */}
-          <aside className="sidebar">
+          <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
             {/* API key */}
             <div>
               <div className="section-label">Authentication</div>

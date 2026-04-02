@@ -542,16 +542,24 @@ const css = `
     font-size: 11px; line-height: 1.5; color: var(--muted2);
     font-family: 'JetBrains Mono', monospace;
     position: relative; transition: border-color .2s;
+    cursor: pointer;
   }
+  .prompt-item:hover { background: var(--card2); }
   .prompt-item.running { border-color: rgba(255,106,0,.45); background: rgba(255,106,0,.04); }
   .prompt-item.done { border-color: rgba(62,207,110,.4); background: rgba(62,207,110,.03); }
   .prompt-item.error { border-color: rgba(240,80,80,.4); }
   .prompt-num {
     flex-shrink: 0; width: 20px; height: 20px; border-radius: 5px;
     background: var(--card2); display: flex; align-items: center; justify-content: center;
-    font-size: 9px; font-weight: 700; color: var(--muted);
+    font-size: 9px; font-weight: 700; color: var(--muted); margin-top: 1px;
   }
-  .prompt-text { flex: 1; padding-right: 50px; }
+  .prompt-text {
+    flex: 1; padding-right: 44px; min-width: 0;
+    display: -webkit-box; -webkit-box-orient: vertical;
+    overflow: hidden; word-break: break-word;
+  }
+  .prompt-text.collapsed { -webkit-line-clamp: 2; }
+  .prompt-text.expanded { -webkit-line-clamp: unset; }
   .prompt-status {
     position: absolute; right: 9px; top: 9px;
     font-size: 10px; display: flex; align-items: center; gap: 4px;
@@ -683,6 +691,7 @@ export default function App() {
   const [refImageUrl, setRefImageUrl] = useState("");
   const [sections, setSections] = useState([]);
   const [expandedSections, setExpandedSections] = useState({});
+  const [expandedPrompts, setExpandedPrompts] = useState({});
   const [batchVersion, setBatchVersion] = useState("v1");
   const [settings, setSettings] = useState({
     model: "nano-banana-pro",
@@ -1011,9 +1020,9 @@ export default function App() {
                         {sec.prompts.map((p, pi) => {
                           const state = promptStates[`${si}-${pi}`] || {};
                           return (
-                            <div key={pi} className={`prompt-item ${state.status || ""}`}>
+                            <div key={pi} className={`prompt-item ${state.status || ""}`} onClick={() => setExpandedPrompts(e => ({ ...e, [`${si}-${pi}`]: !e[`${si}-${pi}`] }))}>
                               <div className="prompt-num">{pi + 1}</div>
-                              <span className="prompt-text">{p}</span>
+                              <span className={`prompt-text ${expandedPrompts[`${si}-${pi}`] ? "expanded" : "collapsed"}`}>{p}</span>
                               <span className="prompt-status">
                                 {state.status === "running" && <><span className="spin" style={{ borderTopColor: "#ff8c40" }} />{Math.round((state.progress || 0) * 100)}%</>}
                                 {state.status === "done" && <span style={{ color: "var(--green)" }}>✓</span>}

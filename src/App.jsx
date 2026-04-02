@@ -206,8 +206,13 @@ function parseHTMLPrompts(html) {
   return sections;
 }
 
-async function pollTask(taskId, apiKey, onProgress) {
-  const url = `${KIE_BASE}/jobs/recordInfo?taskId=${taskId}`;
+async function pollTask(taskId, apiKey, onProgress, model) {
+  // nano-banana models use /playground/recordInfo, others use /jobs/recordInfo
+  const isNano = model && model.includes("nano-banana");
+  const url = isNano
+    ? `${KIE_BASE}/playground/recordInfo?taskId=${taskId}`
+    : `${KIE_BASE}/jobs/recordInfo?taskId=${taskId}`;
+  console.log("[SG poll endpoint]", url);
   let attempts = 0;
   while (attempts < 120) {
     await new Promise((r) => setTimeout(r, 5000));
@@ -238,21 +243,23 @@ async function pollTask(taskId, apiKey, onProgress) {
       if (data.resultJson) {
         try {
           const parsed = JSON.parse(data.resultJson);
+          console.log("[SG resultJson parsed]", JSON.stringify(parsed));
           urls = [
-            ...(Array.isArray(parsed.result_urls) ? parsed.result_urls : []),
+            ...(Array.isArray(parsed.resultUrls) ? parsed.resultUrls : []),       // nano-banana
+            ...(Array.isArray(parsed.result_urls) ? parsed.result_urls : []),     // other models
             ...(Array.isArray(parsed.images) ? parsed.images : []),
             ...(parsed.resultImageUrl ? [parsed.resultImageUrl] : []),
             ...(parsed.imageUrl ? [parsed.imageUrl] : []),
             ...(parsed.url ? [parsed.url] : []),
             ...(typeof parsed === "string" ? [parsed] : []),
           ].filter(Boolean);
-          // If parsed is array of strings directly
           if (urls.length === 0 && Array.isArray(parsed)) {
             urls = parsed.filter(u => typeof u === "string" && u.startsWith("http"));
           }
         } catch {
-          // resultJson might be a plain URL string
-          if (data.resultJson.startsWith("http")) urls = [data.resultJson];
+          if (typeof data.resultJson === "string" && data.resultJson.startsWith("http")) {
+            urls = [data.resultJson];
+          }
         }
       }
       // Also check response field as fallback
@@ -735,7 +742,6 @@ export default function App() {
     aspect_ratio: "1:1",
     resolution: "1K",
     output_format: "png", // valid values: png, jpg, webp
-    concurrency: 2,
   });
   const [running, setRunning] = useState(false);
   const [promptStates, setPromptStates] = useState({});
@@ -842,7 +848,7 @@ export default function App() {
     const taskId = cj.data?.taskId;
     console.log("[SG taskId]", taskId);
     if (!taskId) throw new Error("No taskId returned from createTask");
-    const urls = await pollTask(taskId, apiKey, (p) => setPS(si, pi, { progress: parseFloat(p) }));
+    const urls = await pollTask(taskId, apiKey, (p) => setPS(si, pi, { progress: parseFloat(p) }), settings.model);
     const imageUrl = urls[0];
     if (!imageUrl) throw new Error("Task completed but no image URL returned");
     const ext = settings.output_format === "jpeg" ? "jpg" : settings.output_format;
@@ -861,20 +867,15 @@ export default function App() {
     if (refImage && !refUrl) { toast("Uploading reference image…", "info"); refUrl = await uploadRefImage(); }
     const queue = [];
     sections.forEach((sec, si) => sec.prompts.forEach((p, pi) => queue.push({ si, pi, prompt: p })));
-    const concurrency = parseInt(settings.concurrency) || 2;
-    let qi = 0;
-    const worker = async () => {
-      while (qi < queue.length) {
-        const item = queue[qi++];
-        try { await generateOne(item.si, item.pi, item.prompt, refUrl); }
-        catch (e) {
-          console.error("[SG error] prompt", item.pi + 1, e.message, e.stack);
-          setPS(item.si, item.pi, { status: "error" });
-          toast(`Prompt ${item.pi + 1} failed: ${e.message}`, "error");
-        }
+    // Launch all prompts simultaneously
+    await Promise.all(queue.map(async (item) => {
+      try { await generateOne(item.si, item.pi, item.prompt, refUrl); }
+      catch (e) {
+        console.error("[SG error] prompt", item.pi + 1, e.message, e.stack);
+        setPS(item.si, item.pi, { status: "error" });
+        toast(`Prompt ${item.pi + 1} failed: ${e.message}`, "error");
       }
-    };
-    await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
+    }));
     toast("All generations complete! 🎉", "success");
     setTab("outputs");
     setRunning(false);
@@ -999,12 +1000,7 @@ export default function App() {
                       <option value="webp">WebP</option>
                     </select>
                   </div>
-                  <div className="field">
-                    <label>Concurrency</label>
-                    <select value={settings.concurrency} onChange={(e) => setSettings({ ...settings, concurrency: e.target.value })}>
-                      {[1,2,3,4,5].map(n => <option key={n}>{n}</option>)}
-                    </select>
-                  </div>
+
                 </div>
               </div>
 

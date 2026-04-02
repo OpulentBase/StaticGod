@@ -52,8 +52,55 @@ function parseHTMLPrompts(html) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
   const sections = [];
-  const sectionEls = doc.querySelectorAll("section, [data-section], article, .prompt-section");
-  if (sectionEls.length > 0) {
+
+  // ── FORMAT 1: BunkerAI Batch format ──────────────────────────────────────
+  // Sections: .sec > .sec-title  |  Prompts: .pb grouped under each .sec
+  const secEls = Array.from(doc.querySelectorAll(".sec"));
+  if (secEls.length > 0) {
+    const allPBs = Array.from(doc.querySelectorAll(".pb"));
+    secEls.forEach((secEl, i) => {
+      const title = secEl.querySelector(".sec-title")?.textContent?.trim() || `Section ${i + 1}`;
+      const nextSec = secEls[i + 1] || null;
+      const prompts = [];
+      allPBs.forEach((pb) => {
+        const afterThis = secEl.compareDocumentPosition(pb) & Node.DOCUMENT_POSITION_FOLLOWING;
+        const beforeNext = !nextSec || (nextSec.compareDocumentPosition(pb) & Node.DOCUMENT_POSITION_PRECEDING);
+        if (afterThis && beforeNext) {
+          const clone = pb.cloneNode(true);
+          clone.querySelectorAll("button").forEach((b) => b.remove());
+          const txt = (clone.innerText || clone.textContent || "").trim();
+          if (txt.length > 20) prompts.push(txt);
+        }
+      });
+      if (prompts.length) sections.push({ title, prompts });
+    });
+  }
+
+  // ── FORMAT 2: Dandy / ad-card format ─────────────────────────────────────
+  // Sections: .ad-card  |  Prompts: .prompt-box > p or .prompt-block p
+  if (sections.length === 0) {
+    const adCards = doc.querySelectorAll(".ad-card");
+    if (adCards.length > 0) {
+      adCards.forEach((card, i) => {
+        const title =
+          card.querySelector(".card-title")?.textContent?.trim() ||
+          card.querySelector(".ad-number")?.textContent?.trim() ||
+          `Ad ${i + 1}`;
+        const prompts = [];
+        card.querySelectorAll(".prompt-box p, .prompt-block p").forEach((p) => {
+          const clone = p.cloneNode(true);
+          clone.querySelectorAll("button").forEach((b) => b.remove());
+          const txt = (clone.textContent || "").trim();
+          if (txt.length > 20) prompts.push(txt);
+        });
+        if (prompts.length) sections.push({ title, prompts });
+      });
+    }
+  }
+
+  // ── FORMAT 3: Generic <section> or [data-section] ────────────────────────
+  if (sections.length === 0) {
+    const sectionEls = doc.querySelectorAll("section, [data-section], article, .prompt-section");
     sectionEls.forEach((el, i) => {
       const title =
         el.getAttribute("data-section") ||
@@ -62,39 +109,39 @@ function parseHTMLPrompts(html) {
       const prompts = [];
       el.querySelectorAll("p, li, .prompt, [data-prompt]").forEach((p) => {
         const txt = p.textContent.trim();
-        if (txt.length > 10) prompts.push(txt);
+        if (txt.length > 20) prompts.push(txt);
       });
       if (prompts.length) sections.push({ title, prompts });
     });
   }
+
+  // ── FORMAT 4: h2/h3 heading-delimited ────────────────────────────────────
   if (sections.length === 0) {
-    const headings = doc.querySelectorAll("h2, h3");
-    if (headings.length > 0) {
-      headings.forEach((h) => {
-        const title = h.textContent.trim();
-        const prompts = [];
-        let next = h.nextElementSibling;
-        while (next && !["H2", "H3"].includes(next.tagName)) {
-          next.querySelectorAll("p, li").forEach((p) => {
-            const t = p.textContent.trim();
-            if (t.length > 10) prompts.push(t);
-          });
-          if (prompts.length === 0 && next.textContent.trim().length > 10)
-            prompts.push(next.textContent.trim());
-          next = next.nextElementSibling;
-        }
-        if (prompts.length) sections.push({ title, prompts });
-      });
-    }
+    doc.querySelectorAll("h2, h3").forEach((h) => {
+      const title = h.textContent.trim();
+      const prompts = [];
+      let next = h.nextElementSibling;
+      while (next && !["H2", "H3"].includes(next.tagName)) {
+        next.querySelectorAll("p, li").forEach((p) => {
+          const t = p.textContent.trim();
+          if (t.length > 20) prompts.push(t);
+        });
+        next = next.nextElementSibling;
+      }
+      if (prompts.length) sections.push({ title, prompts });
+    });
   }
+
+  // ── FORMAT 5: Last resort — all <p> ──────────────────────────────────────
   if (sections.length === 0) {
     const prompts = [];
-    doc.querySelectorAll("p, li").forEach((p) => {
+    doc.querySelectorAll("p").forEach((p) => {
       const t = p.textContent.trim();
-      if (t.length > 10) prompts.push(t);
+      if (t.length > 20) prompts.push(t);
     });
     if (prompts.length) sections.push({ title: "Prompts", prompts });
   }
+
   return sections;
 }
 

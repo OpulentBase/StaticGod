@@ -210,30 +210,46 @@ async function pollTask(taskId, apiKey, onProgress) {
   const url = `${KIE_BASE}/jobs/recordInfo?taskId=${taskId}`;
   let attempts = 0;
   while (attempts < 120) {
-    await new Promise((r) => setTimeout(r, 4000));
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
-    const json = await res.json();
-    const data = json.data;
-    if (!data) {
-      // May still be queuing — wait and retry instead of failing immediately
+    await new Promise((r) => setTimeout(r, 5000));
+    let json;
+    try {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+      json = await res.json();
+    } catch (e) {
       attempts++;
       continue;
     }
-    // Progress: use progress field if available (0-1 float or 0-100)
-    const rawProg = data.progress ?? 0;
+    const data = json?.data;
+    if (!data) { attempts++; continue; }
+
+    // Update progress (can be "0.50" string or 0.5 float or 50 int)
+    const rawProg = parseFloat(data.progress ?? 0);
     onProgress(rawProg > 1 ? rawProg / 100 : rawProg);
-    // Status-based completion check
-    const status = (data.status || "").toLowerCase();
-    if (status === "success" || data.successFlag === 1) {
-      const resp = data.response || {};
-      return resp.result_urls || resp.results || resp.imageUrls || resp.image_urls || [];
-    }
-    if (status === "fail" || data.successFlag === 2) {
-      throw new Error(data.errorMessage || data.msg || "Generation failed");
+
+    // Check for failure
+    const sf = data.successFlag;
+    if (sf === 2) throw new Error(data.errorMessage || "Generation failed");
+
+    // Check for success — successFlag === 1
+    if (sf === 1) {
+      const resp = data.response;
+      if (!resp) throw new Error("No response data");
+      // Handle all possible URL field shapes from different Kie.ai models
+      const urls = (
+        resp.result_urls ||         // 4o Image, common
+        resp.results ||
+        resp.image_urls ||
+        resp.imageUrls ||
+        (resp.resultImageUrl ? [resp.resultImageUrl] : null) ||  // Flux Kontext, Nano Banana
+        (resp.imageUrl ? [resp.imageUrl] : null) ||
+        []
+      );
+      if (urls.length > 0) return urls;
+      // response exists but no URLs yet — keep polling
     }
     attempts++;
   }
-  throw new Error("Timed out waiting for generation");
+  throw new Error("Timed out — check kie.ai dashboard for task status");
 }
 
 class VirtualFolder {
@@ -732,22 +748,44 @@ export default function App() {
   const uploadRefImage = async () => {
     if (!refImage || !apiKey) return null;
     try {
+      // Convert image to base64 for upload (avoids CORS issues)
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(refImage);
+      });
+      const res = await fetch("https://kieai.redpandaai.co/api/base64-upload", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          base64Data: base64,
+          fileName: refImage.name,
+          mimeType: refImage.type,
+          uploadPath: "images/user-uploads",
+        }),
+      });
+      const json = await res.json();
+      const url = json.data?.fileUrl || json.data?.downloadUrl || json.data?.url || null;
+      if (url) { setRefImageUrl(url); toast("Reference image uploaded ✓", "success"); return url; }
+      // Fallback: try stream upload
       const fd = new FormData();
       fd.append("file", refImage);
       fd.append("uploadPath", "images/user-uploads");
-      // Kie.ai file upload uses a different base URL
-      const res = await fetch("https://kieai.redpandaai.co/api/file-stream-upload", {
+      const res2 = await fetch("https://kieai.redpandaai.co/api/file-stream-upload", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
         body: fd,
       });
-      const json = await res.json();
-      // Response has fileUrl or downloadUrl inside data
-      const url = json.data?.fileUrl || json.data?.downloadUrl || json.data?.url || null;
-      if (url) { setRefImageUrl(url); toast("Reference image uploaded ✓", "success"); return url; }
-      toast("Image upload failed: no URL returned", "error");
+      const json2 = await res2.json();
+      const url2 = json2.data?.fileUrl || json2.data?.downloadUrl || json2.data?.url || null;
+      if (url2) { setRefImageUrl(url2); toast("Reference image uploaded ✓", "success"); return url2; }
+      toast("Image upload failed — ref image will be skipped", "error");
     } catch (e) {
-      toast("Image upload error: " + e.message, "error");
+      toast("Image upload error: " + e.message + " — ref image skipped", "error");
     }
     return null;
   };
@@ -781,7 +819,9 @@ export default function App() {
     if (cj.code !== 200) throw new Error(cj.msg || "Task creation failed");
     const urls = await pollTask(cj.data.taskId, apiKey, (p) => setPS(si, pi, { progress: parseFloat(p) }));
     const imageUrl = urls[0];
-    const fileName = `${sec.title.replace(/\s+/g, "_")}_p${pi + 1}.${settings.output_format}`;
+    if (!imageUrl) throw new Error("Task completed but no image URL returned");
+    const ext = settings.output_format === "jpeg" ? "jpg" : settings.output_format;
+    const fileName = `${sec.title.replace(/\s+/g, "_")}_p${pi + 1}.${ext}`;
     vfs.add(folderPath, fileName, imageUrl);
     setOutputs((prev) => [...prev, { path: folderPath, name: fileName, url: imageUrl, section: sec.title, prompt }]);
     setPS(si, pi, { status: "done", progress: 1, url: imageUrl });
@@ -1012,17 +1052,29 @@ export default function App() {
                       <h3>{sec.title}</h3>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span className="section-tag">{sec.prompts.length} prompts</span>
-                        <span className={`chevron ${expandedSections[si] ? "open" : ""}`}>▼</span>
+                        <span className={`chevron ${expandedSections[si] !== false ? "open" : ""}`}>▼</span>
                       </div>
                     </div>
-                    {expandedSections[si] && (
+                    {expandedSections[si] !== false && (
                       <div className="prompt-list">
                         {sec.prompts.map((p, pi) => {
                           const state = promptStates[`${si}-${pi}`] || {};
                           return (
                             <div key={pi} className={`prompt-item ${state.status || ""}`} onClick={() => setExpandedPrompts(e => ({ ...e, [`${si}-${pi}`]: !e[`${si}-${pi}`] }))}>
                               <div className="prompt-num">{pi + 1}</div>
-                              <span className={`prompt-text ${expandedPrompts[`${si}-${pi}`] ? "expanded" : "collapsed"}`}>{p}</span>
+                              <span
+                                className="prompt-text"
+                                style={{
+                                  display: "-webkit-box",
+                                  WebkitBoxOrient: "vertical",
+                                  WebkitLineClamp: expandedPrompts[`${si}-${pi}`] ? "unset" : 2,
+                                  overflow: "hidden",
+                                  wordBreak: "break-word",
+                                  flex: 1,
+                                  paddingRight: 44,
+                                  minWidth: 0,
+                                }}
+                              >{p}</span>
                               <span className="prompt-status">
                                 {state.status === "running" && <><span className="spin" style={{ borderTopColor: "#ff8c40" }} />{Math.round((state.progress || 0) * 100)}%</>}
                                 {state.status === "done" && <span style={{ color: "var(--green)" }}>✓</span>}

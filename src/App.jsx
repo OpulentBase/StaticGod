@@ -585,6 +585,7 @@ const css = `
     .dl-row { flex-direction: column; align-items: flex-start; gap: 6px; }
     .toast-wrap { bottom: 14px; right: 12px; left: 12px; }
     .toast { max-width: 100%; }
+    input[type="text"], input[type="password"], select { font-size: 16px; }
   }
   @media (max-width: 380px) {
     .output-grid { grid-template-columns: 1fr 1fr; }

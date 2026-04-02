@@ -219,6 +219,10 @@ async function pollTask(taskId, apiKey, onProgress) {
       attempts++;
       continue;
     }
+
+    // Log every raw response so we can debug in browser console
+    console.log("[StaticGod] poll attempt", attempts, JSON.stringify(json));
+
     const data = json?.data;
     if (!data) { attempts++; continue; }
 
@@ -233,19 +237,21 @@ async function pollTask(taskId, apiKey, onProgress) {
     // Check for success — successFlag === 1
     if (sf === 1) {
       const resp = data.response;
-      if (!resp) throw new Error("No response data");
+      console.log("[StaticGod] SUCCESS response:", JSON.stringify(resp));
+      if (!resp) { attempts++; continue; } // response not populated yet, keep polling
       // Handle all possible URL field shapes from different Kie.ai models
-      const urls = (
-        resp.result_urls ||         // 4o Image, common
-        resp.results ||
-        resp.image_urls ||
-        resp.imageUrls ||
-        (resp.resultImageUrl ? [resp.resultImageUrl] : null) ||  // Flux Kontext, Nano Banana
-        (resp.imageUrl ? [resp.imageUrl] : null) ||
-        []
-      );
+      const urls = [
+        ...(Array.isArray(resp.result_urls) ? resp.result_urls : []),
+        ...(Array.isArray(resp.results) ? resp.results : []),
+        ...(Array.isArray(resp.image_urls) ? resp.image_urls : []),
+        ...(Array.isArray(resp.imageUrls) ? resp.imageUrls : []),
+        ...(resp.resultImageUrl ? [resp.resultImageUrl] : []),
+        ...(resp.imageUrl ? [resp.imageUrl] : []),
+        ...(typeof resp === "string" ? [resp] : []),
+      ].filter(Boolean);
+      console.log("[StaticGod] extracted URLs:", urls);
       if (urls.length > 0) return urls;
-      // response exists but no URLs yet — keep polling
+      // No URLs yet despite successFlag=1, keep trying a few more times
     }
     attempts++;
   }

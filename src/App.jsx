@@ -221,6 +221,7 @@ async function pollTask(taskId, apiKey, onProgress) {
     }
 
     const data = json?.data;
+    console.log("[SG poll]", attempts, "state:", data?.state, "resultJson:", data?.resultJson, "successFlag:", data?.successFlag);
     if (!data) { attempts++; continue; }
 
     const state = (data.state || "").toLowerCase();
@@ -836,8 +837,12 @@ export default function App() {
       body: JSON.stringify(body),
     });
     const cj = await cr.json();
+    console.log("[SG createTask]", JSON.stringify(cj));
     if (cj.code !== 200) throw new Error(cj.msg || "Task creation failed");
-    const urls = await pollTask(cj.data.taskId, apiKey, (p) => setPS(si, pi, { progress: parseFloat(p) }));
+    const taskId = cj.data?.taskId;
+    console.log("[SG taskId]", taskId);
+    if (!taskId) throw new Error("No taskId returned from createTask");
+    const urls = await pollTask(taskId, apiKey, (p) => setPS(si, pi, { progress: parseFloat(p) }));
     const imageUrl = urls[0];
     if (!imageUrl) throw new Error("Task completed but no image URL returned");
     const ext = settings.output_format === "jpeg" ? "jpg" : settings.output_format;
@@ -863,6 +868,7 @@ export default function App() {
         const item = queue[qi++];
         try { await generateOne(item.si, item.pi, item.prompt, refUrl); }
         catch (e) {
+          console.error("[SG error] prompt", item.pi + 1, e.message, e.stack);
           setPS(item.si, item.pi, { status: "error" });
           toast(`Prompt ${item.pi + 1} failed: ${e.message}`, "error");
         }

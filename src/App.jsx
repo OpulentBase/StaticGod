@@ -675,7 +675,7 @@ export default function App() {
     model: "nano-banana-pro",
     aspect_ratio: "1:1",
     resolution: "1K",
-    output_format: "png",
+    output_format: "png", // valid values: png, jpg, webp
     concurrency: 2,
   });
   const [running, setRunning] = useState(false);
@@ -732,10 +732,15 @@ export default function App() {
     setPS(si, pi, { status: "running", progress: 0 });
     const sec = sections[si];
     const folderPath = `${todayStr()}/${batchVersion}/${sec.title.replace(/\s+/g, "_")}`;
-    const body = {
-      model: settings.model,
-      input: { prompt, aspect_ratio: settings.aspect_ratio, resolution: settings.resolution, output_format: settings.output_format },
+    // Nano Banana only accepts "png" or "jpg" (not "jpeg")
+    const normalizeFormat = (fmt) => fmt === "jpeg" ? "jpg" : fmt;
+    const input = {
+      prompt,
+      aspect_ratio: settings.aspect_ratio,
+      resolution: settings.resolution,
+      output_format: normalizeFormat(settings.output_format),
     };
+    const body = { model: settings.model, input };
     if (refUrl) { body.input.image_input = [refUrl]; body.input.image_urls = [refUrl]; }
     const cr = await fetch(`${KIE_BASE}/jobs/createTask`, {
       method: "POST",
@@ -894,7 +899,7 @@ export default function App() {
                     <label>Format</label>
                     <select value={settings.output_format} onChange={(e) => setSettings({ ...settings, output_format: e.target.value })}>
                       <option value="png">PNG</option>
-                      <option value="jpeg">JPEG</option>
+                      <option value="jpg">JPG</option>
                       <option value="webp">WebP</option>
                     </select>
                   </div>

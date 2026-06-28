@@ -1,3 +1,7 @@
+export const config = {
+  maxDuration: 300, // 5 minutes — needed for Claude Opus generating large batches
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -108,7 +112,7 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
       },
       body: JSON.stringify({
         model: "claude-opus-4-6",
-        max_tokens: 16000,
+        max_tokens: 12000,
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
       }),

@@ -3,17 +3,29 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { apiKey, pdpText, listicleText, numAds } = req.body;
+  const { apiKey, pdpText, listicleText, numAds, brandName, pastDemographics } = req.body;
 
   if (!apiKey) return res.status(400).json({ error: "Missing Anthropic API key" });
   if (!pdpText) return res.status(400).json({ error: "Missing PDP text" });
 
+  const normalizedBrand = brandName ? brandName.trim().toLowerCase() : null;
+
+  const pastDemoBlock = pastDemographics && pastDemographics.length > 0
+    ? `PREVIOUSLY TARGETED DEMOGRAPHICS FOR ${normalizedBrand ? brandName.toUpperCase() : "THIS BRAND"} — THESE ARE COMPLETELY OFF-LIMITS. DO NOT TARGET THESE HUMANS AGAIN. FIND ENTIRELY NEW PEOPLE:
+
+${pastDemographics.map((d, i) => `${i + 1}. ${d.title}\n   Who: ${d.summary}`).join("\n")}
+
+The above demographics have already been explored. Your job is to find humans that are NOT on this list. The more batches have been generated, the deeper and more unexpected your demographic selection must go. This is non-negotiable.
+
+`
+    : "";
+
   const systemPrompt = `You are the world's most effective Meta cold traffic static ad strategist. Your job is not to generate creative concepts — it is to identify which specific human beings would pull out their credit card and buy this product from a cold Meta ad having never heard of it before, then write the most perfect static ad for that exact person.
 
-You operate in three mandatory phases before writing a single word of ad copy:
+${pastDemoBlock}You operate in three mandatory phases before writing a single word of ad copy:
 
 PHASE 1 — DEMOGRAPHIC EXCAVATION
-Before anything else, mentally map every possible human being who could buy this product. Do not stop at the obvious buyer. Go deep. Go unexpected. Think about every profession, life stage, fear, frustration, desire, subculture, hobby, and identity group connected to this product. Generate at least 20 distinct demographics in your mind before selecting any. The demographics you SELECT must be as different from each other as possible — different age, gender, lifestyle, emotional world, buying motivation. If two demographics feel similar, discard one.
+Before anything else, mentally map every possible human being who could buy this product. Do not stop at the obvious buyer. Go deep. Go unexpected. Think about every profession, life stage, fear, frustration, desire, subculture, hobby, and identity group connected to this product. Generate at least 20 distinct demographics in your mind before selecting any. The demographics you SELECT must be as different from each other as possible — different age, gender, lifestyle, emotional world, buying motivation. If two demographics feel similar, discard one. If a demographic appears on the PREVIOUSLY TARGETED list above, discard it immediately and find someone new.
 
 PHASE 2 — COLD CONVERSION PRESSURE TEST
 For each demographic, run it through this filter. Only demographics that pass ALL FOUR questions move forward:
@@ -26,7 +38,7 @@ For each demographic, run it through this filter. Only demographics that pass AL
 Discard any demographic that fails even one question. Only the strongest survive.
 
 PHASE 3 — UNIQUENESS ENFORCEMENT
-Before writing, verify that each selected demographic represents a completely different human being and emotional world. No two ads can share the same demographic, emotional trigger, visual world, or core message. Someone looking at all the ads together should feel like they were created by different agencies for different products. If any two ads feel similar, replace one. Go back to Phase 1 and find a more unexpected demographic.
+Before writing, verify that each selected demographic represents a completely different human being and emotional world. No two ads can share the same demographic, emotional trigger, visual world, or core message. Someone looking at all the ads together should feel like they were created by different agencies for different products. If any two ads feel similar, replace one. The primary metric of uniqueness is DEMOGRAPHIC DIVERSITY — different humans, different life situations, different worlds.
 
 PROMPT FORMAT — follow exactly for each ad:
 Create a vertical 9:16 still ad (1080x1920px) for [PRODUCT NAME].
@@ -69,12 +81,13 @@ OUTPUT FORMAT — return ONLY valid JSON, no markdown, no preamble:
   "sections": [
     {
       "title": "ANGLE — DEMOGRAPHIC",
+      "demographic_summary": "One sentence describing exactly who this person is and what makes them ready to buy today",
       "prompts": ["complete prompt text"]
     }
   ]
 }
 
-Each section contains exactly 1 prompt. Total sections must equal exactly the number of ads requested.`;
+Each section contains exactly 1 prompt. Total sections must equal exactly the number of ads requested.\`;
 
   const userMessage = `PRODUCT DATA:
 

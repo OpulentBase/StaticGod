@@ -881,7 +881,7 @@ export default function App() {
   const generateOne = async (si, pi, prompt, refUrl) => {
     setPS(si, pi, { status: "running", progress: 0 });
     const sec = sections[si];
-    const folderPath = `${todayStr()}/${batchVersion}/${sec.title.replace(/\s+/g, "_")}`;
+    const folderPath = `Batch_${todayStr()}`;
     // Nano Banana only accepts "png" or "jpg" (not "jpeg")
     const normalizeFormat = (fmt) => fmt === "jpeg" ? "jpg" : fmt;
     const input = {

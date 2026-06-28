@@ -712,6 +712,21 @@ const css = `
   }
   .btn-ai:hover:not(:disabled) { opacity: .9; transform: translateY(-1px); box-shadow: 0 8px 28px rgba(91,45,142,.35); }
   .btn-ai:disabled { opacity: .35; cursor: not-allowed; transform: none; }
+  .brand-row { display: flex; gap: 8px; align-items: flex-end; }
+  .brand-row input { flex: 1; }
+  .history-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(255,106,0,.1); border: 1px solid rgba(255,106,0,.2);
+    border-radius: 6px; padding: 4px 10px;
+    font-size: 10px; color: #ff8c40; font-family: 'JetBrains Mono', monospace;
+    margin-top: 6px; cursor: default;
+  }
+  .history-badge .clear-btn {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: 10px; padding: 0 0 0 4px; font-family: 'JetBrains Mono', monospace;
+    transition: color .15s;
+  }
+  .history-badge .clear-btn:hover { color: var(--red); }
   .ai-key-row { display: flex; flex-direction: column; gap: 5px; }
 
   /* ── SPINNER ── */
@@ -797,6 +812,8 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inputMode, setInputMode] = useState("html"); // "html" | "ai"
+  const [brandName, setBrandName] = useState("");
+  const [brandHistory, setBrandHistory] = useState([]);
   const [anthropicKey, setAnthropicKey] = useState("");
   const [pdpUrl, setPdpUrl] = useState("");
   const [listicleUrl, setListicleUrl] = useState("");
@@ -913,6 +930,36 @@ export default function App() {
     setPS(si, pi, { status: "done", progress: 1, url: imageUrl });
   };
 
+  // ── Brand demographic database (localStorage) ──
+  const getBrandKey = (name) => `sg_brand_${(name || "default").trim().toLowerCase().replace(/\s+/g, "_")}`;
+
+  const loadBrandHistory = (name) => {
+    try {
+      const raw = localStorage.getItem(getBrandKey(name));
+      const history = raw ? JSON.parse(raw) : [];
+      setBrandHistory(history);
+      return history;
+    } catch { setBrandHistory([]); return []; }
+  };
+
+  const saveBrandHistory = (name, newDemographics) => {
+    try {
+      const key = getBrandKey(name);
+      const existing = JSON.parse(localStorage.getItem(key) || "[]");
+      const merged = [...existing, ...newDemographics];
+      localStorage.setItem(key, JSON.stringify(merged));
+      setBrandHistory(merged);
+    } catch (e) { console.error("[SG db]", e); }
+  };
+
+  const clearBrandHistory = (name) => {
+    try {
+      localStorage.removeItem(getBrandKey(name));
+      setBrandHistory([]);
+      toast(`History cleared${name ? " for " + name : ""}`, "success");
+    } catch {}
+  };
+
   const fetchPage = async (url, label) => {
     if (!url.trim()) return;
     toast(`Fetching ${label}…`, "info");
@@ -933,6 +980,12 @@ export default function App() {
     setAiGenerating(true);
     setSections([]);
     setExpandedSections({});
+
+    // Load existing demographic history for this brand
+    const history = loadBrandHistory(brandName);
+    if (history.length > 0) {
+      toast(`Loaded ${history.length} past demographics — finding new humans only`, "info");
+    }
 
     // Auto-fetch URLs if text fields are empty
     let finalPdp = pdpText.trim();
@@ -1028,6 +1081,8 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
           pdpText: finalPdp,
           listicleText: finalListicle,
           numAds,
+          brandName: brandName.trim() || null,
+          pastDemographics: history,
         }),
       });
       const parsed = await res.json();
@@ -1038,6 +1093,15 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
       setSections(parsed.sections);
       setExpandedSections(Object.fromEntries(parsed.sections.map((_, i) => [i, true])));
       const total = parsed.sections.reduce((a, s) => a + s.prompts.length, 0);
+
+      // Save new demographics to brand database
+      const newDemographics = parsed.sections.map(s => ({
+        title: s.title,
+        summary: s.demographic_summary || "",
+        date: todayStr(),
+      }));
+      saveBrandHistory(brandName, newDemographics);
+
       toast(`✨ ${total} prompts across ${parsed.sections.length} angles — ready to generate!`, "success");
       setTab("prompts");
       setSidebarOpen(false);
@@ -1163,6 +1227,27 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
                         onChange={(e) => setAnthropicKey(e.target.value)}
                       />
                     </div>
+                  </div>
+
+                  {/* Brand Name (optional) */}
+                  <div className="field">
+                    <label>Brand Name <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional)</span></label>
+                    <input
+                      type="text"
+                      placeholder="e.g. BunkerAI, DANDY, Seoul…"
+                      value={brandName}
+                      onChange={(e) => { setBrandName(e.target.value); loadBrandHistory(e.target.value); }}
+                    />
+                    {brandHistory.length > 0 && (
+                      <div className="history-badge">
+                        📊 {brandHistory.length} demographics in database
+                        <button
+                          className="clear-btn"
+                          onClick={() => clearBrandHistory(brandName)}
+                          title="Clear history for this brand"
+                        >✕ reset</button>
+                      </div>
+                    )}
                   </div>
 
                   {/* PDP */}

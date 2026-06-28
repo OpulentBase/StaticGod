@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "api/generate-prompts.js": {
+      "maxDuration": 300
+    },
+    "api/fetch-page.js": {
+      "maxDuration": 30
+    },
+    "api/proxy-image.js": {
+      "maxDuration": 30
+    }
+  }
+}

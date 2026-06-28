@@ -1042,6 +1042,13 @@ export default function App() {
     } catch (e) { console.error("[SG db]", e); }
   };
 
+  // Extract all known visual environments from brand history
+  const getPastVisualEnvironments = (history) => {
+    return history
+      .map(d => d.visualEnvironment)
+      .filter(Boolean);
+  };
+
   const clearBrandHistory = (name) => {
     try {
       localStorage.removeItem(getBrandKey(name));
@@ -1174,6 +1181,7 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
           numAds,
           brandName: brandName.trim() || null,
           pastDemographics: history,
+          pastVisualEnvironments: getPastVisualEnvironments(history),
         }),
       });
       console.log("[SG generate] Response status:", res.status, res.headers.get("content-type"));
@@ -1195,10 +1203,11 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
       setExpandedSections(Object.fromEntries(parsed.sections.map((_, i) => [i, true])));
       const total = parsed.sections.reduce((a, s) => a + s.prompts.length, 0);
 
-      // Save new demographics to brand database
+      // Save new demographics + visual environments to brand database
       const newDemographics = parsed.sections.map(s => ({
         title: s.title,
         summary: s.demographic_summary || "",
+        visualEnvironment: s.visual_environment || "",
         date: todayStr(),
       }));
       saveBrandHistory(brandName, newDemographics);
@@ -1360,7 +1369,7 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
                     />
                     {brandHistory.length > 0 && (
                       <div className="history-badge">
-                        📊 {brandHistory.length} demographics in database
+                        📊 {brandHistory.length} demographics · {getPastVisualEnvironments(brandHistory).length} visual environments locked
                         <button
                           className="clear-btn"
                           onClick={() => clearBrandHistory(brandName)}

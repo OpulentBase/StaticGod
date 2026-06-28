@@ -91,7 +91,7 @@ OUTPUT FORMAT — return ONLY valid JSON, no markdown, no preamble:
   ]
 }
 
-Each section contains exactly 1 prompt. Total sections must equal exactly the number of ads requested.\`;
+Each section contains exactly 1 prompt. Total sections must equal exactly the number of ads requested.`;
 
   const userMessage = `PRODUCT DATA:
 

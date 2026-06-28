@@ -672,6 +672,48 @@ const css = `
   .toast-info { background: rgba(255,106,0,.1); border: 1px solid rgba(255,106,0,.28); color: #ff8c40; }
   @keyframes toastIn { from { transform: translateX(28px); opacity: 0; } to { transform: none; opacity: 1; } }
 
+  /* ── AI GENERATOR ── */
+  .ai-panel { display: flex; flex-direction: column; gap: 10px; }
+  .mode-toggle {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+    background: var(--card); border-radius: 8px; padding: 3px;
+    border: 1px solid var(--border2);
+  }
+  .mode-btn {
+    padding: 7px 10px; border-radius: 6px; font-size: 11px; font-weight: 700;
+    cursor: pointer; border: none; background: transparent; color: var(--muted2);
+    transition: all .15s; font-family: 'Barlow', sans-serif; letter-spacing: .3px;
+  }
+  .mode-btn.active { background: linear-gradient(135deg, #ff6a00, #ee0979); color: #fff; }
+  .ai-textarea {
+    background: var(--card); border: 1px solid var(--border2); border-radius: 8px;
+    color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    padding: 10px 12px; width: 100%; outline: none; resize: vertical; min-height: 90px;
+    line-height: 1.5; transition: border-color .15s;
+  }
+  .ai-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,106,0,.1); }
+  .ai-textarea::placeholder { color: var(--muted); }
+  .num-ads-row { display: flex; align-items: center; gap: 10px; }
+  .num-ads-row label { font-size: 11px; font-weight: 600; color: var(--muted2); white-space: nowrap; }
+  .num-ads-row input[type=number] {
+    width: 70px; background: var(--card); border: 1px solid var(--border2);
+    border-radius: 8px; color: var(--text); font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; padding: 8px 10px; outline: none; text-align: center;
+    -webkit-appearance: none; transition: border-color .15s;
+  }
+  .num-ads-row input[type=number]:focus { border-color: var(--accent); }
+  .btn-ai {
+    background: linear-gradient(135deg, #5b2d8e, #ee0979);
+    color: #fff; width: 100%; font-size: 13px; font-weight: 700;
+    padding: 12px; border-radius: 9px; border: none; cursor: pointer;
+    font-family: 'Barlow', sans-serif; display: flex; align-items: center;
+    justify-content: center; gap: 7px; transition: all .18s;
+    box-shadow: 0 4px 20px rgba(91,45,142,.25);
+  }
+  .btn-ai:hover:not(:disabled) { opacity: .9; transform: translateY(-1px); box-shadow: 0 8px 28px rgba(91,45,142,.35); }
+  .btn-ai:disabled { opacity: .35; cursor: not-allowed; transform: none; }
+  .ai-key-row { display: flex; flex-direction: column; gap: 5px; }
+
   /* ── SPINNER ── */
   .spin {
     display: inline-block; width: 13px; height: 13px;
@@ -754,6 +796,14 @@ export default function App() {
   const [tab, setTab] = useState("prompts");
   const [toasts, setToasts] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [inputMode, setInputMode] = useState("html"); // "html" | "ai"
+  const [anthropicKey, setAnthropicKey] = useState("");
+  const [pdpUrl, setPdpUrl] = useState("");
+  const [listicleUrl, setListicleUrl] = useState("");
+  const [pdpText, setPdpText] = useState("");
+  const [listicleText, setListicleText] = useState("");
+  const [numAds, setNumAds] = useState(10);
+  const [aiGenerating, setAiGenerating] = useState(false);
   const [vfs] = useState(() => new VirtualFolder());
   const htmlInputRef = useRef();
   const refInputRef = useRef();
@@ -863,6 +913,151 @@ export default function App() {
     setPS(si, pi, { status: "done", progress: 1, url: imageUrl });
   };
 
+  const fetchPage = async (url, label) => {
+    if (!url.trim()) return;
+    toast(`Fetching ${label}…`, "info");
+    try {
+      const res = await fetch(`/api/fetch-page?url=${encodeURIComponent(url.trim())}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      toast(`${label} fetched — ${json.chars.toLocaleString()} chars`, "success");
+      return json.text;
+    } catch (e) {
+      toast(`Failed to fetch ${label}: ${e.message}`, "error");
+      return null;
+    }
+  };
+
+  const generatePromptsWithAI = async () => {
+    if (!anthropicKey) { toast("Enter your Anthropic API key", "error"); return; }
+    setAiGenerating(true);
+    setSections([]);
+    setExpandedSections({});
+
+    // Auto-fetch URLs if text fields are empty
+    let finalPdp = pdpText.trim();
+    let finalListicle = listicleText.trim();
+
+    if (!finalPdp && pdpUrl.trim()) {
+      const fetched = await fetchPage(pdpUrl, "PDP");
+      if (fetched) { setPdpText(fetched); finalPdp = fetched; }
+    }
+    if (!finalListicle && listicleUrl.trim()) {
+      const fetched = await fetchPage(listicleUrl, "Listicle");
+      if (fetched) { setListicleText(fetched); finalListicle = fetched; }
+    }
+
+    if (!finalPdp) { toast("Provide a PDP URL or paste PDP text", "error"); setAiGenerating(false); return; }
+    toast("Claude is analyzing your product…", "info");
+
+    const systemPrompt = `You are the world's best Meta cold traffic static ad strategist and creative director. You write Nano Banana Pro image generation prompts that produce scroll-stopping, high-converting static ads.
+
+You have studied thousands of winning Meta ads. You understand that every product has an infinite number of psychological angles — and your job is to find the most powerful, untested ones and write the most perfect version of each angle as one complete static ad prompt.
+
+RULES FOR ANGLES:
+- Every angle must be psychologically distinct. Not just a different headline — a completely different entry point into the customer's mind.
+- Draw from the full universe of angles: pain points, identity, comparison, social proof, curiosity gaps, fear, aspiration, mechanism reveal, cost anchoring, transformation, tribal belonging, authority, counter-intuitive claims, journaling/experiment formats, editorial manifestos, before/after, UGC-style testimonial, product hero, lifestyle scene, etc.
+- Never repeat an angle. If you use "pain point" once, don't use it again.
+- Each prompt must be the MOST PERFECT version of that one angle — written as if this single ad will be the only ad you ever run for this angle.
+
+FORMAT FOR EACH PROMPT (follow this exactly):
+Create a vertical 9:16 still ad (1080x1920px) for [PRODUCT NAME].
+
+ANGLE: [The psychological hook. Who it targets. The specific fear, desire, or belief being activated. Why this angle works for cold traffic.]
+
+AESTHETIC: [Visual mood, lighting direction, color temperature, reference style — e.g. "warm editorial", "dark luxury", "clean clinical", "documentary candid". Be hyper-specific.]
+
+TOP HEADLINE ([font style, size direction, color, placement]):
+"[Line 1 exact copy]"
+[Second line direction]: "[Line 2 exact copy]"
+[Color note if applicable]: "[Line 3 exact copy]"
+
+CENTER SCENE:
+[Hyper-detailed description of exactly what is in the frame. Product placement, lighting angle, props, human elements, skin tone if applicable, what is on screen/display, what text overlays appear in the scene itself. Write this as a film director's shot brief — every element matters.]
+
+LOWER ([number] items — [audience-specific note]):
+✅ [Specific copy line 1]
+✅ [Specific copy line 2]
+✅ [Specific copy line 3]
+✅ [Specific copy line 4]
+
+BOTTOM BAR:
+"[Closing line with price or CTA]"
+[Brand element] + "[URL or brand line — pricing, guarantee, key differentiator]"
+
+RULES FOR THE PROMPT ITSELF:
+- Write the actual headline copy. Not "[HEADLINE HERE]" — the real words.
+- Every checklist item must have the real copy, not placeholders.
+- Be specific about colors, typography style (warm serif / bold sans / italic gold / etc.), and exact placement (top-left, bottom-right, center, lower third, etc.)
+- The scene description should be so detailed that an AI image model can render it without guessing.
+- End with a MOOD line: "Mood: [3-5 word vibe]"
+
+OUTPUT FORMAT — return ONLY valid JSON, no markdown, no explanation:
+{
+  "sections": [
+    {
+      "title": "SECTION NAME IN CAPS",
+      "prompts": ["full prompt text for ad 1"]
+    },
+    {
+      "title": "ANOTHER SECTION",
+      "prompts": ["full prompt text for ad 2"]
+    }
+  ]
+}
+
+Group prompts into sections by angle category (e.g. "PAIN POINT", "SOCIAL PROOF", "COMPARISON", "IDENTITY", "MECHANISM REVEAL", etc.). Each section can have 1-3 prompts. Total prompts must equal exactly the number requested.`;
+
+    const userMessage = `PRODUCT DATA:
+
+=== PDP ===
+${finalPdp}
+
+${finalListicle ? `=== LISTICLE ===
+${finalListicle}` : ""}
+
+Generate exactly ${numAds} unique static ad prompts for this product. Each must attack a completely different psychological angle. Return only the JSON.`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-calls": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-opus-4-6",
+          max_tokens: 16000,
+          system: systemPrompt,
+          messages: [{ role: "user", content: userMessage }],
+        }),
+      });
+      const data = await res.json();
+
+      if (data.error) throw new Error(data.error.message);
+
+      const raw = data.content?.[0]?.text || "";
+      // Strip any markdown fences
+      const clean = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+      const parsed = JSON.parse(clean);
+
+      if (!parsed.sections || !Array.isArray(parsed.sections)) throw new Error("Invalid response structure");
+
+      setSections(parsed.sections);
+      setExpandedSections(Object.fromEntries(parsed.sections.map((_, i) => [i, true])));
+      const total = parsed.sections.reduce((a, s) => a + s.prompts.length, 0);
+      toast(`✨ ${total} prompts across ${parsed.sections.length} angles — ready to generate!`, "success");
+      setTab("prompts");
+      setSidebarOpen(false);
+    } catch (e) {
+      console.error("[SG AI]", e);
+      toast("AI generation failed: " + e.message, "error");
+    }
+    setAiGenerating(false);
+  };
+
   const runGeneration = async () => {
     if (!apiKey) { toast("Enter your Kie.ai API key", "error"); return; }
     if (!sections.length) { toast("Upload an HTML prompt file first", "error"); return; }
@@ -934,18 +1129,131 @@ export default function App() {
                 </div>
               </div>
 
+              {/* ── INPUT MODE TOGGLE ── */}
               <div>
-                <div className="section-label">Prompt Template</div>
-                <div className="upload-zone" onClick={() => htmlInputRef.current?.click()}>
-                  <input ref={htmlInputRef} type="file" accept=".html,.htm" style={{ display: "none" }} onChange={(e) => handleHtmlFile(e.target.files[0])} />
-                  <div className="uz-icon">📄</div>
-                  {htmlFile ? (
-                    <><p><strong>{htmlFile.name}</strong></p><div className="file-chip">✓ {totalPrompts} prompts · {sections.length} sections</div></>
-                  ) : (
-                    <p>Drop your <strong>.html</strong> prompt file<br />or click to browse</p>
-                  )}
+                <div className="section-label">Prompt Source</div>
+                <div className="mode-toggle">
+                  <button className={`mode-btn ${inputMode === "html" ? "active" : ""}`} onClick={() => setInputMode("html")}>
+                    📄 Upload HTML
+                  </button>
+                  <button className={`mode-btn ${inputMode === "ai" ? "active" : ""}`} onClick={() => setInputMode("ai")}>
+                    ✨ AI Generate
+                  </button>
                 </div>
               </div>
+
+              {/* ── HTML UPLOAD MODE ── */}
+              {inputMode === "html" && (
+                <div>
+                  <div className="section-label">Prompt Template</div>
+                  <div className="upload-zone" onClick={() => htmlInputRef.current?.click()}>
+                    <input ref={htmlInputRef} type="file" accept=".html,.htm" style={{ display: "none" }} onChange={(e) => handleHtmlFile(e.target.files[0])} />
+                    <div className="uz-icon">📄</div>
+                    {htmlFile ? (
+                      <><p><strong>{htmlFile.name}</strong></p><div className="file-chip">✓ {totalPrompts} prompts · {sections.length} sections</div></>
+                    ) : (
+                      <p>Drop your <strong>.html</strong> prompt file<br />or click to browse</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── AI GENERATE MODE ── */}
+              {inputMode === "ai" && (
+                <div className="ai-panel">
+                  <div className="section-label">AI Prompt Generator</div>
+
+                  <div className="ai-key-row">
+                    <div className="field">
+                      <label>Anthropic API Key</label>
+                      <input
+                        type="password"
+                        placeholder="sk-ant-…"
+                        value={anthropicKey}
+                        onChange={(e) => setAnthropicKey(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* PDP */}
+                  <div className="field">
+                    <label>PDP URL <span style={{ color: "var(--muted)", fontWeight: 400 }}>or paste text below</span></label>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input
+                        type="text"
+                        placeholder="https://yourstore.com/products/…"
+                        value={pdpUrl}
+                        onChange={(e) => { setPdpUrl(e.target.value); setPdpText(""); }}
+                        style={{ flex: 1, fontSize: 11 }}
+                      />
+                      <button
+                        className="btn-ghost"
+                        style={{ flexShrink: 0, padding: "8px 12px", fontSize: 11 }}
+                        onClick={async () => { const t = await fetchPage(pdpUrl, "PDP"); if (t) setPdpText(t); }}
+                        disabled={!pdpUrl.trim()}
+                      >Fetch</button>
+                    </div>
+                    <textarea
+                      className="ai-textarea"
+                      placeholder="…or paste PDP text directly here"
+                      value={pdpText}
+                      onChange={(e) => { setPdpText(e.target.value); setPdpUrl(""); }}
+                      style={{ minHeight: 90, marginTop: 6 }}
+                    />
+                    {pdpText && <div style={{ fontSize: 10, color: "var(--green)", fontFamily: "JetBrains Mono, monospace" }}>✓ {pdpText.length.toLocaleString()} chars loaded</div>}
+                  </div>
+
+                  {/* Listicle */}
+                  <div className="field">
+                    <label>Listicle URL <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional)</span></label>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input
+                        type="text"
+                        placeholder="https://yourstore.com/blog/…"
+                        value={listicleUrl}
+                        onChange={(e) => { setListicleUrl(e.target.value); setListicleText(""); }}
+                        style={{ flex: 1, fontSize: 11 }}
+                      />
+                      <button
+                        className="btn-ghost"
+                        style={{ flexShrink: 0, padding: "8px 12px", fontSize: 11 }}
+                        onClick={async () => { const t = await fetchPage(listicleUrl, "Listicle"); if (t) setListicleText(t); }}
+                        disabled={!listicleUrl.trim()}
+                      >Fetch</button>
+                    </div>
+                    <textarea
+                      className="ai-textarea"
+                      placeholder="…or paste listicle/advertorial text directly here"
+                      value={listicleText}
+                      onChange={(e) => { setListicleText(e.target.value); setListicleUrl(""); }}
+                      style={{ minHeight: 70, marginTop: 6 }}
+                    />
+                    {listicleText && <div style={{ fontSize: 10, color: "var(--green)", fontFamily: "JetBrains Mono, monospace" }}>✓ {listicleText.length.toLocaleString()} chars loaded</div>}
+                  </div>
+
+                  <div className="num-ads-row">
+                    <label>Number of Ads</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={numAds}
+                      onChange={(e) => setNumAds(parseInt(e.target.value) || 10)}
+                    />
+                  </div>
+
+                  <button
+                    className="btn-ai"
+                    onClick={generatePromptsWithAI}
+                    disabled={aiGenerating || !anthropicKey || !pdpText.trim()}
+                  >
+                    {aiGenerating
+                      ? <><span className="spin" /> Generating {numAds} Ad Angles…</>
+                      : <>✨ Generate {numAds} Ad Prompts with Claude</>
+                    }
+                  </button>
+                </div>
+              )}
 
               <div>
                 <div className="section-label">Reference Image</div>

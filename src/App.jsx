@@ -1073,6 +1073,7 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
 
     try {
       // Route through Vercel proxy to avoid CORS
+      console.log("[SG generate] Calling /api/generate-prompts", { numAds, brand: brandName || "default", historyCount: history.length });
       const res = await fetch("/api/generate-prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1085,10 +1086,20 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
           pastDemographics: history,
         }),
       });
-      const parsed = await res.json();
+      console.log("[SG generate] Response status:", res.status, res.headers.get("content-type"));
+      // Check content-type before parsing — Vercel sometimes returns HTML error pages
+      const contentType = res.headers.get("content-type") || "";
+      let parsed;
+      if (contentType.includes("application/json")) {
+        parsed = await res.json();
+      } else {
+        const text = await res.text();
+        console.error("[SG generate] Non-JSON response:", text.slice(0, 300));
+        throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 100)}`);
+      }
 
-      if (!res.ok) throw new Error(parsed.error || "Server error");
-      if (!parsed.sections || !Array.isArray(parsed.sections)) throw new Error("Invalid response structure");
+      if (!res.ok) throw new Error(parsed.error || `Server error ${res.status}`);
+      if (!parsed.sections || !Array.isArray(parsed.sections)) throw new Error("Invalid response structure from Claude");
 
       setSections(parsed.sections);
       setExpandedSections(Object.fromEntries(parsed.sections.map((_, i) => [i, true])));

@@ -1014,7 +1014,12 @@ export default function App() {
     const imageUrl = urls[0];
     if (!imageUrl) throw new Error("Task completed but no image URL returned");
     const ext = settings.output_format === "jpeg" ? "jpg" : settings.output_format;
-    const fileName = `${sec.title.replace(/\s+/g, "_")}_p${pi + 1}.${ext}`;
+    const safeTitle = sec.title
+      .replace(/[\/\\:*?"<>|]/g, "")
+      .replace(/\s+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "");
+    const fileName = `${safeTitle}_p${pi + 1}.${ext}`;
     vfs.add(folderPath, fileName, imageUrl);
     setOutputs((prev) => [...prev, { path: folderPath, name: fileName, url: imageUrl, section: sec.title, prompt }]);
     setPS(si, pi, { status: "done", progress: 1, url: imageUrl });

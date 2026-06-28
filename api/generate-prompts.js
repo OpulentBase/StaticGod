@@ -7,7 +7,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { apiKey, pdpText, listicleText, numAds, brandName, pastDemographics } = req.body;
+  const { apiKey, pdpText, listicleText, numAds, brandName, pastDemographics, pastVisualEnvironments } = req.body;
 
   if (!apiKey) return res.status(400).json({ error: "Missing Anthropic API key" });
   if (!pdpText) return res.status(400).json({ error: "Missing PDP text" });
@@ -24,9 +24,20 @@ The above demographics have already been explored. Your job is to find humans th
 `
     : "";
 
+
+  const pastVisualBlock = pastVisualEnvironments && pastVisualEnvironments.length > 0
+    ? `PREVIOUSLY USED VISUAL ENVIRONMENTS FOR THIS BRAND — DO NOT REPEAT THESE VISUAL WORLDS. Every new ad must take place in a completely different environment:
+
+${pastVisualEnvironments.map((v, i) => `${i + 1}. ${v}`).join("\n")}
+
+Also infer the likely visual environments from the demographics list above and avoid those too. The visual world of each new ad must be immediately distinguishable from all previous ads at a glance — different location, lighting, setting, props, human context.
+
+`
+    : "";
+
   const systemPrompt = `You are the world's most effective Meta cold traffic static ad strategist. Your job is not to generate creative concepts — it is to identify which specific human beings would pull out their credit card and buy this product from a cold Meta ad having never heard of it before, then write the most perfect static ad for that exact person.
 
-${pastDemoBlock}You operate in three mandatory phases before writing a single word of ad copy:
+${pastDemoBlock}${pastVisualBlock}You operate in three mandatory phases before writing a single word of ad copy:
 
 PHASE 1 — DEMOGRAPHIC EXCAVATION
 Before anything else, mentally map every possible human being who could buy this product. Do not stop at the obvious buyer. Go deep. Go unexpected. Think about every profession, life stage, fear, frustration, desire, subculture, hobby, and identity group connected to this product. Generate at least 20 distinct demographics in your mind before selecting any. The demographics you SELECT must be as different from each other as possible — different age, gender, lifestyle, emotional world, buying motivation. If two demographics feel similar, discard one. If a demographic appears on the PREVIOUSLY TARGETED list above, discard it immediately and find someone new.
@@ -48,6 +59,8 @@ PROMPT FORMAT — follow exactly for each ad:
 Create a vertical 9:16 still ad (1080x1920px) for [PRODUCT NAME].
 
 DEMOGRAPHIC: [Exactly who this person is. Age range, life situation, what they were doing when they encountered this problem, why they are ready to buy today.]
+
+VISUAL ENVIRONMENT: [One specific phrase describing the physical world of this ad — e.g. "underground mine shaft with headlamp light", "sailboat cabin chart table at night", "monastic stone study cell with candlelight". This must be completely different from any previously used visual environment.]
 
 ANGLE: [The single emotional truth this ad is built on. The specific fear, desire, or belief being activated. Why this angle cold-converts for this exact person.]
 
@@ -86,6 +99,7 @@ OUTPUT FORMAT — return ONLY valid JSON, no markdown, no preamble:
     {
       "title": "ANGLE — DEMOGRAPHIC",
       "demographic_summary": "One sentence describing exactly who this person is and what makes them ready to buy today",
+      "visual_environment": "One phrase describing the physical visual world of this ad (e.g. underground mine shaft, sailboat cabin, monastic stone study)",
       "prompts": ["complete prompt text"]
     }
   ]

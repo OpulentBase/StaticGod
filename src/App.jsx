@@ -1019,30 +1019,20 @@ ${finalListicle}` : ""}
 Generate exactly ${numAds} unique static ad prompts for this product. Each must attack a completely different psychological angle. Return only the JSON.`;
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      // Route through Vercel proxy to avoid CORS
+      const res = await fetch("/api/generate-prompts", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-calls": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-opus-4-6",
-          max_tokens: 16000,
-          system: systemPrompt,
-          messages: [{ role: "user", content: userMessage }],
+          apiKey: anthropicKey,
+          pdpText: finalPdp,
+          listicleText: finalListicle,
+          numAds,
         }),
       });
-      const data = await res.json();
+      const parsed = await res.json();
 
-      if (data.error) throw new Error(data.error.message);
-
-      const raw = data.content?.[0]?.text || "";
-      // Strip any markdown fences
-      const clean = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
-      const parsed = JSON.parse(clean);
-
+      if (!res.ok) throw new Error(parsed.error || "Server error");
       if (!parsed.sections || !Array.isArray(parsed.sections)) throw new Error("Invalid response structure");
 
       setSections(parsed.sections);

@@ -1206,11 +1206,13 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
 
       outer: while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
 
-        sseBuffer += decoder.decode(value, { stream: true });
+        // Flush decoder when stream ends
+        if (value) sseBuffer += decoder.decode(value, { stream: !done });
+
+        // When done, process ALL remaining lines — don't pop the last one
         const lines = sseBuffer.split("\n");
-        sseBuffer = lines.pop() ?? "";
+        sseBuffer = done ? "" : (lines.pop() ?? "");
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
@@ -1228,6 +1230,9 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
             break outer;
           }
         }
+
+        // Break AFTER processing all buffered lines
+        if (done) break;
       }
 
       if (!parsed) throw new Error("Stream ended without a result");

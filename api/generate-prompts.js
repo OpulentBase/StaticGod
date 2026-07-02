@@ -121,7 +121,6 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
 
   const model = promptModel || "claude-fable-5";
   const isNano = model.includes("nano-banana");
-  const isFable = model.includes("fable");
 
   try {
     // ── STREAMING request to Anthropic ──────────────────────────────────────
@@ -136,7 +135,6 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
         model,
         max_tokens: Math.min(Math.max(numAds * 3000, 16000), 80000),
         stream: true,
-        ...(isFable ? { effort: "high" } : {}),
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
       }),

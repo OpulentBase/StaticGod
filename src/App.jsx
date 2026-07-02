@@ -910,6 +910,7 @@ export default function App() {
   const [pdpText, setPdpText] = useState("");
   const [listicleText, setListicleText] = useState("");
   const [numAds, setNumAds] = useState(10);
+  const [promptModel, setPromptModel] = useState("claude-fable-5");
   const [aiGenerating, setAiGenerating] = useState(false);
   const [vfs] = useState(() => new VirtualFolder());
   const htmlInputRef = useRef();
@@ -1187,6 +1188,7 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
           brandName: brandName.trim() || null,
           pastDemographics: history,
           pastVisualEnvironments: getPastVisualEnvironments(history),
+          promptModel,
         }),
       });
       console.log("[SG generate] Response status:", res.status, res.headers.get("content-type"));
@@ -1449,6 +1451,26 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
                       value={numAds}
                       onChange={(e) => setNumAds(parseInt(e.target.value) || 10)}
                     />
+                  </div>
+
+                  {/* Model toggle */}
+                  <div className="field">
+                    <label>Claude Model for Prompt Generation</label>
+                    <div className="mode-toggle">
+                      <button
+                        className={`mode-btn ${promptModel === "claude-fable-5" ? "active" : ""}`}
+                        onClick={() => setPromptModel("claude-fable-5")}
+                      >⚡ Fable 5</button>
+                      <button
+                        className={`mode-btn ${promptModel === "claude-opus-4-6" ? "active" : ""}`}
+                        onClick={() => setPromptModel("claude-opus-4-6")}
+                      >🧠 Opus</button>
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--muted)", fontFamily: "'JetBrains Mono',monospace", marginTop: 5 }}>
+                      {promptModel === "claude-fable-5"
+                        ? "Fable 5 — most capable, deeper reasoning"
+                        : "Opus — fast, reliable, lower cost"}
+                    </div>
                   </div>
 
                   <button

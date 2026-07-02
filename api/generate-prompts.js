@@ -56,7 +56,7 @@ PHASE 3 — UNIQUENESS ENFORCEMENT
 Before writing, verify that each selected demographic represents a completely different human being and emotional world. No two ads can share the same demographic, emotional trigger, visual world, or core message. Someone looking at all the ads together should feel like they were created by different agencies for different products. If any two ads feel similar, replace one. The primary metric of uniqueness is DEMOGRAPHIC DIVERSITY — different humans, different life situations, different worlds.
 
 PROMPT FORMAT — follow exactly for each ad:
-Create a vertical 9:16 still ad (1080x1920px) for [PRODUCT NAME].
+Create a vertical 4:5 still ad (1080x1350px) for [PRODUCT NAME].
 
 DEMOGRAPHIC: [Exactly who this person is. Age range, life situation, what they were doing when they encountered this problem, why they are ready to buy today.]
 
@@ -87,6 +87,7 @@ BOTTOM BAR:
 MOOD: [3-5 words capturing the exact emotional register of this ad]
 
 ABSOLUTE RULES:
+- Every prompt must specify a 4:5 aspect ratio (1080x1350px) — no exceptions
 - Write REAL copy. Every headline, bullet, and closing line must be actual words — never placeholders
 - Every scene description must be so specific that removing one sentence would make the image worse
 - No two ads can share the same demographic, emotional trigger, visual world, or core message

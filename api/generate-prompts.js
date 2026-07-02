@@ -143,14 +143,25 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
       return res.status(400).json({ error: "Fable 5 declined this request — try rephrasing your product description or reduce the number of ads." });
     }
 
+    // Log full response for debugging
+    console.log("[SG] stop_reason:", data.stop_reason);
+    console.log("[SG] content block types:", data.content?.map(b => b.type));
+
     // Fable 5 returns thinking blocks alongside text blocks — find the text block specifically
     const textBlock = Array.isArray(data.content)
       ? data.content.find(block => block.type === "text")
       : null;
     const raw = textBlock?.text || data.content?.[0]?.text || "";
 
+    console.log("[SG] raw response (first 500):", raw.slice(0, 500));
+    console.log("[SG] raw response (last 200):", raw.slice(-200));
+
     if (!raw) {
-      return res.status(500).json({ error: "No text response returned from Claude", blocks: data.content?.map(b => b.type) });
+      return res.status(500).json({
+        error: "No text response returned from Claude",
+        blocks: data.content?.map(b => b.type),
+        stop_reason: data.stop_reason,
+      });
     }
 
     const clean = raw
@@ -162,8 +173,16 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
     let parsed;
     try {
       parsed = JSON.parse(clean);
-    } catch {
-      return res.status(500).json({ error: "Claude returned invalid JSON", raw: clean.slice(0, 500) });
+    } catch (parseErr) {
+      console.error("[SG] JSON parse error:", parseErr.message);
+      console.error("[SG] clean content (first 1000):", clean.slice(0, 1000));
+      console.error("[SG] clean content (last 500):", clean.slice(-500));
+      return res.status(500).json({
+        error: "Claude returned invalid JSON — " + parseErr.message,
+        preview: clean.slice(0, 300),
+        tail: clean.slice(-200),
+        stop_reason: data.stop_reason,
+      });
     }
 
     if (!parsed.sections || !Array.isArray(parsed.sections)) {

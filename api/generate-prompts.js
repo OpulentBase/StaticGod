@@ -160,11 +160,13 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
 
-      sseBuffer += decoder.decode(value, { stream: true });
+      // Decode chunk — when done, flush remaining bytes in decoder
+      if (value) sseBuffer += decoder.decode(value, { stream: !done });
+
+      // When stream is done, process ALL remaining lines in buffer (don't pop last)
       const lines = sseBuffer.split("\n");
-      sseBuffer = lines.pop() ?? "";
+      sseBuffer = done ? "" : (lines.pop() ?? "");
 
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
@@ -234,6 +236,8 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
           return;
         }
       }
+
+      if (done) break;
     }
 
     res.end();

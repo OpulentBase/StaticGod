@@ -126,7 +126,8 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
       },
       body: JSON.stringify({
         model: promptModel || "claude-fable-5",
-        max_tokens: 16000,
+        // Fable 5 writes ~3000 tokens per detailed prompt — scale dynamically
+        max_tokens: Math.min(Math.max(numAds * 3000, 16000), 100000),
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
       }),

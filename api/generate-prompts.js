@@ -1,5 +1,5 @@
 export const config = {
-  maxDuration: 300, // 5 minutes — needed for Claude Opus generating large batches
+  maxDuration: 800, // 13+ minutes with Fluid Compute enabled
 };
 
 export default async function handler(req, res) {
@@ -7,7 +7,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { apiKey, pdpText, listicleText, numAds, brandName, pastDemographics, pastVisualEnvironments, promptModel } = req.body;
+  const {
+    apiKey, pdpText, listicleText, numAds,
+    brandName, pastDemographics, pastVisualEnvironments, promptModel,
+  } = req.body;
 
   if (!apiKey) return res.status(400).json({ error: "Missing Anthropic API key" });
   if (!pdpText) return res.status(400).json({ error: "Missing PDP text" });
@@ -23,7 +26,6 @@ The above demographics have already been explored. Your job is to find humans th
 
 `
     : "";
-
 
   const pastVisualBlock = pastVisualEnvironments && pastVisualEnvironments.length > 0
     ? `PREVIOUSLY USED VISUAL ENVIRONMENTS FOR THIS BRAND — DO NOT REPEAT THESE VISUAL WORLDS. Every new ad must take place in a completely different environment:
@@ -117,8 +119,13 @@ ${listicleText ? `=== LISTICLE ===\n${listicleText}` : ""}
 
 Generate exactly ${numAds} unique static ad prompts for this product. Each must attack a completely different psychological angle. Return only the JSON.`;
 
+  const model = promptModel || "claude-fable-5";
+  const isNano = model.includes("nano-banana");
+  const isFable = model.includes("fable");
+
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    // ── STREAMING request to Anthropic ──────────────────────────────────────
+    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -126,74 +133,118 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: promptModel || "claude-fable-5",
-        // Fable 5 writes ~3000 tokens per detailed prompt — scale dynamically
-        max_tokens: Math.min(Math.max(numAds * 3000, 16000), 100000),
+        model,
+        max_tokens: Math.min(Math.max(numAds * 3000, 16000), 80000),
+        stream: true,
+        ...(isFable ? { effort: "high" } : {}),
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
       }),
     });
 
-    const data = await response.json();
-
-    if (data.error) {
-      return res.status(400).json({ error: data.error.message });
+    if (!anthropicRes.ok) {
+      const errText = await anthropicRes.text();
+      return res.status(anthropicRes.status).json({ error: errText });
     }
 
-    // Fable 5 can return stop_reason: "refusal" for certain flagged requests
-    if (data.stop_reason === "refusal") {
-      return res.status(400).json({ error: "Fable 5 declined this request — try rephrasing your product description or reduce the number of ads." });
-    }
-
-    // Log full response for debugging
-    console.log("[SG] stop_reason:", data.stop_reason);
-    console.log("[SG] content block types:", data.content?.map(b => b.type));
-
-    // Fable 5 returns thinking blocks alongside text blocks — find the text block specifically
-    const textBlock = Array.isArray(data.content)
-      ? data.content.find(block => block.type === "text")
-      : null;
-    const raw = textBlock?.text || data.content?.[0]?.text || "";
-
-    console.log("[SG] raw response (first 500):", raw.slice(0, 500));
-    console.log("[SG] raw response (last 200):", raw.slice(-200));
-
-    if (!raw) {
-      return res.status(500).json({
-        error: "No text response returned from Claude",
-        blocks: data.content?.map(b => b.type),
-        stop_reason: data.stop_reason,
-      });
-    }
-
-    const clean = raw
-      .replace(/^```json\s*/i, "")
-      .replace(/^```\s*/i, "")
-      .replace(/```\s*$/i, "")
-      .trim();
-
-    let parsed;
-    try {
-      parsed = JSON.parse(clean);
-    } catch (parseErr) {
-      console.error("[SG] JSON parse error:", parseErr.message);
-      console.error("[SG] clean content (first 1000):", clean.slice(0, 1000));
-      console.error("[SG] clean content (last 500):", clean.slice(-500));
-      return res.status(500).json({
-        error: "Claude returned invalid JSON — " + parseErr.message,
-        preview: clean.slice(0, 300),
-        tail: clean.slice(-200),
-        stop_reason: data.stop_reason,
-      });
-    }
-
-    if (!parsed.sections || !Array.isArray(parsed.sections)) {
-      return res.status(500).json({ error: "Invalid response structure from Claude" });
-    }
-
+    // ── Set up SSE response headers ──────────────────────────────────────────
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
     res.setHeader("Access-Control-Allow-Origin", "*");
-    return res.status(200).json(parsed);
+
+    // ── Stream processing ────────────────────────────────────────────────────
+    const reader = anthropicRes.body.getReader();
+    const decoder = new TextDecoder();
+    let sseBuffer = "";
+    let fullText = "";
+    let activeBlockType = null; // "thinking" | "text"
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      sseBuffer += decoder.decode(value, { stream: true });
+      const lines = sseBuffer.split("\n");
+      sseBuffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const raw = line.slice(6).trim();
+        if (raw === "[DONE]") continue;
+
+        let event;
+        try { event = JSON.parse(raw); } catch { continue; }
+
+        // Track which block type is active (thinking vs text)
+        if (event.type === "content_block_start") {
+          activeBlockType = event.content_block?.type ?? null;
+        }
+
+        // Forward only text deltas (skip thinking blocks)
+        if (
+          event.type === "content_block_delta" &&
+          event.delta?.type === "text_delta" &&
+          activeBlockType === "text"
+        ) {
+          const chunk = event.delta.text || "";
+          fullText += chunk;
+          // Send progress to client
+          res.write(`data: ${JSON.stringify({ type: "chunk", text: chunk, total: fullText.length })}\n\n`);
+        }
+
+        // Handle refusal (Fable 5 safety classifier)
+        if (event.type === "message_delta" && event.delta?.stop_reason === "refusal") {
+          res.write(`data: ${JSON.stringify({ type: "error", error: "Fable 5 declined this request — try rephrasing your product description." })}\n\n`);
+          res.end();
+          return;
+        }
+
+        // Handle max_tokens cutoff
+        if (event.type === "message_delta" && event.delta?.stop_reason === "max_tokens") {
+          res.write(`data: ${JSON.stringify({ type: "error", error: "Response was too long — reduce the number of ads or try again." })}\n\n`);
+          res.end();
+          return;
+        }
+
+        // Stream complete — parse and validate JSON
+        if (event.type === "message_stop") {
+          const clean = fullText
+            .replace(/^```json\s*/i, "")
+            .replace(/^```\s*/i, "")
+            .replace(/```\s*$/i, "")
+            .trim();
+
+          let parsed;
+          try {
+            parsed = JSON.parse(clean);
+          } catch (e) {
+            res.write(`data: ${JSON.stringify({ type: "error", error: "Invalid JSON from Claude: " + e.message, preview: clean.slice(0, 200) })}\n\n`);
+            res.end();
+            return;
+          }
+
+          if (!parsed.sections || !Array.isArray(parsed.sections)) {
+            res.write(`data: ${JSON.stringify({ type: "error", error: "Invalid response structure" })}\n\n`);
+            res.end();
+            return;
+          }
+
+          // Send final parsed result
+          res.write(`data: ${JSON.stringify({ type: "done", data: parsed })}\n\n`);
+          res.end();
+          return;
+        }
+      }
+    }
+
+    res.end();
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    // If headers not sent yet, send JSON error; otherwise send SSE error
+    if (!res.headersSent) {
+      return res.status(500).json({ error: e.message });
+    }
+    res.write(`data: ${JSON.stringify({ type: "error", error: e.message })}\n\n`);
+    res.end();
   }
 }

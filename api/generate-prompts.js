@@ -7,7 +7,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { apiKey, pdpText, listicleText, numAds, brandName, pastDemographics, pastVisualEnvironments } = req.body;
+  const { apiKey, pdpText, listicleText, numAds, brandName, pastDemographics, pastVisualEnvironments, promptModel } = req.body;
 
   if (!apiKey) return res.status(400).json({ error: "Missing Anthropic API key" });
   if (!pdpText) return res.status(400).json({ error: "Missing PDP text" });
@@ -125,8 +125,8 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-opus-4-6",
-        max_tokens: 12000,
+        model: promptModel || "claude-fable-5",
+        max_tokens: 16000,
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
       }),
@@ -136,6 +136,11 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
 
     if (data.error) {
       return res.status(400).json({ error: data.error.message });
+    }
+
+    // Fable 5 can return stop_reason: "refusal" for certain flagged requests
+    if (data.stop_reason === "refusal") {
+      return res.status(400).json({ error: "Fable 5 declined this request — try rephrasing your product description or reduce the number of ads." });
     }
 
     const raw = data.content?.[0]?.text || "";

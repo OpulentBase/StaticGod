@@ -143,7 +143,16 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
       return res.status(400).json({ error: "Fable 5 declined this request — try rephrasing your product description or reduce the number of ads." });
     }
 
-    const raw = data.content?.[0]?.text || "";
+    // Fable 5 returns thinking blocks alongside text blocks — find the text block specifically
+    const textBlock = Array.isArray(data.content)
+      ? data.content.find(block => block.type === "text")
+      : null;
+    const raw = textBlock?.text || data.content?.[0]?.text || "";
+
+    if (!raw) {
+      return res.status(500).json({ error: "No text response returned from Claude", blocks: data.content?.map(b => b.type) });
+    }
+
     const clean = raw
       .replace(/^```json\s*/i, "")
       .replace(/^```\s*/i, "")

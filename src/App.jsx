@@ -912,6 +912,7 @@ export default function App() {
   const [numAds, setNumAds] = useState(10);
   const [promptModel, setPromptModel] = useState("claude-fable-5");
   const [aiGenerating, setAiGenerating] = useState(false);
+  const [streamStatus, setStreamStatus] = useState("");
   const [vfs] = useState(() => new VirtualFolder());
   const htmlInputRef = useRef();
   const refInputRef = useRef();
@@ -1176,7 +1177,7 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
 
     try {
       // Route through Vercel proxy to avoid CORS
-      console.log("[SG generate] Calling /api/generate-prompts", { numAds, brand: brandName || "default", historyCount: history.length });
+      setStreamStatus("Claude is thinking…");
       const res = await fetch("/api/generate-prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1191,19 +1192,45 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
           promptModel,
         }),
       });
-      console.log("[SG generate] Response status:", res.status, res.headers.get("content-type"));
-      // Check content-type before parsing — Vercel sometimes returns HTML error pages
-      const contentType = res.headers.get("content-type") || "";
-      let parsed;
-      if (contentType.includes("application/json")) {
-        parsed = await res.json();
-      } else {
-        const text = await res.text();
-        console.error("[SG generate] Non-JSON response:", text.slice(0, 300));
-        throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 100)}`);
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Server error ${res.status}: ${errText.slice(0, 100)}`);
       }
 
-      if (!res.ok) throw new Error(parsed.error || `Server error ${res.status}`);
+      // ── Read SSE stream ──────────────────────────────────────────────────
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = "";
+      let parsed = null;
+
+      outer: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split("\n");
+        sseBuffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          let event;
+          try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (event.type === "chunk") {
+            setStreamStatus(`Writing prompts… ${event.total.toLocaleString()} chars`);
+          }
+          if (event.type === "error") {
+            throw new Error(event.error);
+          }
+          if (event.type === "done") {
+            parsed = event.data;
+            break outer;
+          }
+        }
+      }
+
+      if (!parsed) throw new Error("Stream ended without a result");
       if (!parsed.sections || !Array.isArray(parsed.sections)) throw new Error("Invalid response structure from Claude");
 
       setSections(parsed.sections);
@@ -1219,14 +1246,17 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
       }));
       saveBrandHistory(brandName, newDemographics);
 
+      setStreamStatus("");
       toast(`✨ ${total} prompts across ${parsed.sections.length} angles — ready to generate!`, "success");
       setTab("prompts");
       setSidebarOpen(false);
     } catch (e) {
       console.error("[SG AI]", e);
+      setStreamStatus("");
       toast("AI generation failed: " + e.message, "error");
     }
     setAiGenerating(false);
+    setStreamStatus("");
   };
 
   // Remove a single prompt — if last in section, removes section too
@@ -1479,7 +1509,7 @@ Generate exactly ${numAds} unique static ad prompts for this product. Each must 
                     disabled={aiGenerating || !anthropicKey || !pdpText.trim()}
                   >
                     {aiGenerating
-                      ? <><span className="spin" /> Generating {numAds} Ad Angles…</>
+                      ? <><span className="spin" /> {streamStatus || `Generating ${numAds} Ad Angles…`}</>
                       : <>✨ Generate {numAds} Ad Prompts with Claude</>
                     }
                   </button>
